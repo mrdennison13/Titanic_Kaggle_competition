@@ -307,9 +307,202 @@ print(scores.mean())
 
 
 
+#now lets try to replace the missing ages, to make that a feature
+#first, lets try using the random forest to learn on the data we have with ages, and then replace them accordingly
+
+df_train_age = df_train.loc[df_train['Age'].notnull()]
+df_test_age = df_test.loc[df_test['Age'].notnull()]
+df_train_age_test = df_train.loc[df_train['Age'].isnull()]
+df_test_age_test = df_test.loc[df_test['Age'].isnull()]
+
+df_train_age.corr()['Age']
+df_test_age.corr()['Age']
+
+sns.boxplot(x="Survived", y="Age", data=df_train_age)
+
+#passenger class, the number of siblings, parents and the fare seem to be quite good indicators
+features = ['Pclass', 'SibSp', 'Parch', 'Fare', 'Sex', 'Fare']
+
+#first we try a crude fit on the continuous age data
+train_features = df_train_age[features].values.reshape(-1,len(features))
+train_label    = df_train_age.Age.reshape(-1,1)
+
+#split it into a training and a test set (60% to train)
+X_train, X_test, y_train, y_test = train_test_split(train_features, train_label, test_size=0.4)
 
 
-#And this is it for random forest.
+from sklearn.ensemble import RandomForestRegressor
 
-# I find that on the test set I get somewhere between 0.74 and 0.78, and it varies each time
-# (it is a method that makes use of random sampling, and we have a small-ish data set)
+rf = RandomForestRegressor(min_samples_split=2, n_estimators=250,max_features=2,max_depth=501,min_samples_leaf=3)
+
+rf.fit(X_train, y_train)
+
+#now find the accuracy on the test set
+1.0 - float(np.absolute(y_test - rf.predict(X_test).reshape((y_test.shape[0],1))).sum())/float(y_test.shape[0])
+
+#Not so good
+
+
+
+
+#Lets put the ages in bins, the max age we have is 80, min is about 0.17
+df_train_age['Age'].max()
+df_train_age['Age'].min()
+df_test_age['Age'].max()
+df_test_age['Age'].min()
+
+
+nbins = 10
+
+bins = range(0,80+int(80.0/nbins),int(80.0/nbins))
+labels = range(0,len(bins)-1)
+
+df_train_age['Age_cat'] = pd.cut(df_train_age['Age'], bins, labels=labels)
+df_test_age['Age_cat'] = pd.cut(df_test_age['Age'], bins, labels=labels)
+
+sns.factorplot(x="Age_cat", y="Survived", data=df_train_age)
+
+#young children are most likely to survive, then it drops of sharply
+#lets take kids (0-18) adults (18-55) and oldies (55+) 
+bins = [0, 18,55, 81]
+labels = range(0,len(bins)-1)
+df_train_age['Age_cat'] = pd.cut(df_train_age['Age'], bins, labels=labels)
+df_test_age['Age_cat'] = pd.cut(df_test_age['Age'], bins, labels=labels)
+sns.factorplot(x="Age_cat", y="Survived", data=df_train_age)
+plt.show()
+
+
+#try random forest regression and round to the nearest integer:
+
+features = ['Pclass', 'SibSp', 'Parch', 'Fare', 'Sex', 'Fare']
+
+train_features = df_train_age[features].values.reshape(-1,len(features))
+train_label    = df_train_age['Age_cat'].astype('int8').reshape(-1,1)
+
+test_features = df_train_age_train[features].values.reshape(-1,len(features))
+
+
+#split it into a training and a test set (70% to train)
+X_train, X_test, y_train, y_test = train_test_split(train_features, train_label, test_size=0.3)
+
+from sklearn.ensemble import RandomForestRegressor
+
+rf = RandomForestRegressor(min_samples_split=2, n_estimators=250,max_features=2, max_depth=501, min_samples_leaf=5)
+
+rf.fit(X_train, y_train)
+
+#now find the accuracy on the test set
+float(np.absolute(y_test.reshape(y_test.shape[0],) - np.rint(rf.predict(X_test)).astype(np.int64)).sum())/float(y_test.shape[0])
+np.count_nonzero((np.rint(rf.predict(X_test)).astype(np.int64)-y_test.reshape(y_test.shape[0],)))/float(y_test.shape[0])
+
+#about 18% are wrong, but this does not seem too bad ....
+
+age_class_predict = np.rint(rf.predict(test_features)).astype(np.int64)
+df_train.loc[ (df_train.Age.isnull()), 'Age_cat' ] = age_class_predict
+df_train.loc[ (df_train.Age.notnull()), 'Age_cat' ] = df_train_age['Age_cat']
+
+
+
+
+#try it also on the original test set
+train_features = df_test_age[features].values.reshape(-1,len(features))
+train_label    = df_test_age['Age_cat'].astype('int8').reshape(-1,1)
+
+test_features = df_test_age_test[features].values.reshape(-1,len(features))
+
+
+#split it into a training and a test set (70% to train)
+X_train, X_test, y_train, y_test = train_test_split(train_features, train_label, test_size=0.3)
+
+from sklearn.ensemble import RandomForestRegressor
+
+rf = RandomForestRegressor(min_samples_split=2, n_estimators=250,max_features=2, max_depth=501, min_samples_leaf=5)
+
+rf.fit(X_train, y_train)
+
+#now find the accuracy on the test set
+float(np.absolute(y_test.reshape(y_test.shape[0],) - np.rint(rf.predict(X_test)).astype(np.int64)).sum())/float(y_test.shape[0])
+np.count_nonzero((np.rint(rf.predict(X_test)).astype(np.int64)-y_test.reshape(y_test.shape[0],)))/float(y_test.shape[0])
+
+
+#about 24% are wrong ... still the best we can do
+
+age_class_predict = np.rint(rf.predict(test_features)).astype(np.int64)
+df_test.loc[ (df_test.Age.isnull()), 'Age_cat' ] = age_class_predict
+df_test.loc[ (df_test.Age.notnull()), 'Age_cat' ] = df_test_age['Age_cat']
+
+
+
+#now let us try random forest with age catagory as a feature
+
+features = ['Pclass','Sex','Fare', 'Embarked','Fam_type','Age_cat']
+
+#make them into something that can be read by the random forest function
+train_features = df_train[features].values.reshape(-1,len(features))
+train_label    = df_train.Survived.reshape(-1,1)
+test_features = df_test[features].values.reshape(-1,len(features))
+
+rf = RandomForestClassifier(n_estimators=500,max_features=4,max_depth=501,min_samples_leaf=5)
+
+#split it into a training and a test set (60% to train)
+X_train, X_test, y_train, y_test = train_test_split(train_features, train_label, test_size=0.4)
+
+rf.fit(X_train, y_train)
+#now find the accuracy on the test set
+1.0 - float(np.absolute(y_test - rf.predict(X_test).reshape((y_test.shape[0],1))).sum())/float(y_test.shape[0])
+
+#about 82%
+df_test_out = df_test
+df_test_out['Survived'] = rf.predict(test_features)
+df_test_out[['PassengerId', 'Survived']].to_csv('prediction_Dennison_RF_features6.csv',  index = False)
+
+
+
+#How about name length
+df_train['Name_len'] = df_train.Name.str.len()
+df_test['Name_len'] = df_test.Name.str.len()
+
+df_train['Name_len'].max()
+df_test['Name_len'].max()
+df_train['Name_len'].min()
+df_test['Name_len'].min()
+#12 min, 82 max
+
+#bin it
+nbins = 5
+
+bins = range(10,82+int(82.0/nbins),int(82.0/nbins))
+labels = range(0,len(bins)-1)
+
+df_train['Name_cat'] = pd.cut(df_train['Name_len'], bins, labels=labels)
+df_test['Name_cat'] = pd.cut(df_test['Name_len'], bins, labels=labels)
+
+sns.factorplot(x="Name_cat", y="Survived", data=df_train)
+plt.show()
+
+
+
+
+#now let us try random forest with age catagory as a feature
+
+features = ['Pclass','Sex','Fare', 'Embarked','Fam_type','Age_cat', 'Name_cat']
+
+#make them into something that can be read by the random forest function
+train_features = df_train[features].values.reshape(-1,len(features))
+train_label    = df_train.Survived.reshape(-1,1)
+test_features = df_test[features].values.reshape(-1,len(features))
+
+rf = RandomForestClassifier(n_estimators=500,max_features=3,max_depth=501,min_samples_leaf=5)
+
+#split it into a training and a test set (60% to train)
+X_train, X_test, y_train, y_test = train_test_split(train_features, train_label, test_size=0.4)
+
+rf.fit(X_train, y_train)
+#now find the accuracy on the test set
+1.0 - float(np.absolute(y_test - rf.predict(X_test).reshape((y_test.shape[0],1))).sum())/float(y_test.shape[0])
+
+#about 82%
+df_test_out = df_test
+df_test_out['Survived'] = rf.predict(test_features)
+df_test_out[['PassengerId', 'Survived']].to_csv('prediction_Dennison_RF_features7.csv',  index = False)
+
