@@ -14,8 +14,12 @@ quantisation_rules = {
 	'Sex': TABLE,
 	'Age': AS_IS,
 	'SibSp': AS_IS,
+	'Parch': AS_IS,
 	'Fare': AS_IS,
+	'nCabins': AS_IS,
+	'Title': DUMMY,
 	'Embarked': DUMMY,
+	'CabinLetters': DUMMY,
 	'Survived': AS_IS
 }
 
@@ -27,7 +31,11 @@ def tabular(x, table):
 	return table[x]
 
 def dummyvar(x, unique_vals):
-	return tuple([ (1 if x==a else 0) for a in unique_vals ])
+	if isinstance(x, str) or isinstance(x, int) or isinstance(x, float):
+		#return tuple([ (1 if x==a else 0) for a in unique_vals ])
+		return dummyvar([x], unique_vals)
+	elif isinstance(x, list) or isinstance(x, set) or isinstance(x, tuple):
+		return tuple([ (1 if a in x else 0) for a in unique_vals ])
 	
 def read_table(filename):
 	result = list()
@@ -61,13 +69,15 @@ def get_unique_vals(table, keys):
 			result_unique = dict()
 	result_min_max = dict()
 	for f in feats_unique:
-		result_unique[f]=list()
+		result_unique[f]=set()
 	for f in feats_min_max:
 		result_min_max[f]=[float('inf'), -float('inf')]
 	for row in table:
 		for f in feats_unique:
-			if row[f] not in result_unique[f]:
-				result_unique[f].append(row[f])
+			if isinstance(row[f], set):
+				result_unique[f]=result_unique[f].union(row[f])
+			else:
+				result_unique[f].add(row[f])
 		for f in feats_min_max:
 			try:
 				val = float(row[f])
@@ -77,8 +87,36 @@ def get_unique_vals(table, keys):
 			result_min_max[f][1] = max(val, result_min_max[f][1])
 	return result_unique, result_min_max
 
+def add_derived_features(table):
+	for row in table:
 	
-def make_set(table, mode, label_header, keys, unique_vals, min_max_vals):
+		#find title (let's see if this works :P)
+		name_part = row['Name'].split(',')[-1].strip()
+		title = name_part.split(' ')[0].strip()
+		row['Title']=title
+		
+		#find number of cabins & cabin letters
+		cabins = row['Cabin'].split(' ')
+		n_cabins = len(cabins)
+		cabin_letters = set()
+		for c in cabins:
+			to_add = ''.join([i for i in str(c.strip()) if not i.isdigit()])
+			cabin_letters.add(to_add)
+		row['nCabins']=1 if n_cabins==0 else n_cabins #it seems reasonable to assume most people have 1 cabin
+		row['CabinLetters']=cabin_letters
+	
+def make_q_headers(keys, unique_vals):
+	result = list()
+	for key in keys:
+		rule = quantisation_rules[key]
+		if rule==DUMMY:
+			for val in unique_vals[key]:
+				result.append(key + '_' + val)
+		else:
+			result.append(key)
+	return tuple(result)
+	
+def make_t_set(table, mode, label_header, keys, unique_vals, min_max_vals):
 
 	result_data = list()
 	result_labels = list()
@@ -111,24 +149,51 @@ def make_set(table, mode, label_header, keys, unique_vals, min_max_vals):
 	else:
 		return result_data, result_labels
 
+def get_accuracy(model, data, real_labels):
+	pred_labels = model.predict(data)
+	corr = 0
+	assert len(pred_labels)==len(real_labels)
+	for i in range(len(pred_labels)):
+		if str(pred_labels[i])==str(real_labels[i]):
+			corr+=1
+	return float(corr) / len(pred_labels)
+
 def main():
 	train_table, headers_train = read_table('train.csv')
+	add_derived_features(train_table)
+	write_table(train_table, headers_train + ['Title', 'nCabins', 'CabinLetters'], 'derived_table.csv')
+
+
 	keys = list(quantisation_rules.keys())
-	unique_vals, min_max_vals = get_unique_vals(train_table, keys)	
-	training_data, training_labels = make_set(train_table, TRAIN, 'Survived', keys, unique_vals, min_max_vals)
+	unique_vals, min_max_vals = get_unique_vals(train_table, keys)
+	
+	training_data, training_labels = make_t_set(train_table, TRAIN, 'Survived', keys, unique_vals, min_max_vals)
+	
 	test_table, headers_test = read_table('test.csv')
 	keys.remove('Survived')
-	test_data = make_set(test_table, TEST, 'Survived', keys, unique_vals, min_max_vals)
-	logreg = lm.LogisticRegression()
+	add_derived_features(test_table)
+	test_data = make_t_set(test_table, TEST, 'Survived', keys, unique_vals, min_max_vals)
+	logreg = lm.LogisticRegression(verbose=1)
 	logreg.fit(training_data, training_labels)
-	predicted_labels=logreg.predict(test_data)
+	print()
+
+	coef_headers = make_q_headers(keys, unique_vals)
+	assert len(coef_headers)==len(logreg.coef_[0])
+	for i in range(len(coef_headers)):
+		print("{h}: {c}".format(h=coef_headers[i], c=logreg.coef_[0][i]))
+	print("Intercept: " + str(logreg.intercept_[0]))
+		
+	print("\nAccuracy against training set: " + str(get_accuracy(logreg, training_data, training_labels)))
 	
+	
+
+	predicted_labels=logreg.predict(test_data)	
 	output_data = test_table
 	assert len(output_data)==len(predicted_labels)
 	for i in range(len(output_data)):
 		output_data[i]['Survived']=predicted_labels[i]
-	
-	write_table(output_data, headers_train, 'prediction_Kwaadgras_LR.csv') #Score so far: 0.77033
+	write_table(output_data, headers_train + ['Title', 'nCabins', 'CabinLetters'], 'prediction_full_LR.csv')
+	write_table(output_data, ['PassengerId', 'Survived'], 'prediction_Kwaadgras_LR.csv') #Score so far: 0.78469
 
 if __name__=="__main__":
 	main()
