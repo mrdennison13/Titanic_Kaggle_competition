@@ -1,4 +1,4 @@
-<div>Predicting whether a passanger would surivive the sinking of the Titanic or not, using data from Kaggle.</div>
+<div>Predicting whether a passanger would surivive the sinking of the Titanic or not, using data from Kaggle<br><br>.</div>
 
 <ul>
   <li> Titanic_exploratory.ipynb - the exploratory data analysis and feature selection/engineering</li>
